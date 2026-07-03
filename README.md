@@ -26,6 +26,7 @@ graph LR
 
 | Stage | Tool | Guarantee |
 | --- | --- | --- |
+| SAST | Semgrep CE (`p/golang`, `p/gosec`, `p/cwe-top-25`) | insecure code patterns fail the build before anything is compiled |
 | Build | Docker multi-stage → distroless/static | no shell, no package manager, ~2 MB attack surface; base images pinned by digest |
 | Vulnerability gate | Trivy | CRITICAL/HIGH with an available fix ⇒ the image is **never published** |
 | Inventory | Syft | SPDX SBOM generated and attached to the image as a signed attestation |

@@ -26,5 +26,8 @@ func main() {
 	})
 
 	log.Printf("listening on :%s", port)
+	// Plain HTTP by design: in-cluster traffic; TLS terminates at the
+	// ingress/mesh (see k8s/networkpolicy — only same-namespace clients).
+	// nosemgrep: go.lang.security.audit.net.use-tls.use-tls
 	log.Fatal(http.ListenAndServe(":"+port, mux))
 }
