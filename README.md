@@ -59,6 +59,16 @@ graph LR
 PRs run the build + Trivy + SBOM gates only; nothing is published or signed
 until the commit lands on `main`.
 
+### Supply-chain risk on every PR (Socket)
+
+When a PR adds or changes a dependency, Socket analyses the package's actual
+code and posts a risk scorecard on the PR. Whether a finding blocks is set in
+the Socket **Security Policy** (`error` fails the check, `warn` only reports) —
+not in the workflow. Below: a test PR that added deliberately dangerous
+dependencies, blocked with `High CVE` alerts once the policy was set to `error`:
+
+![Socket flagging risky dependencies on a pull request with High CVE alerts](socket-scan.png)
+
 ## Verify it yourself
 
 Anyone can verify the image — that's the point of keyless + transparency logs:
