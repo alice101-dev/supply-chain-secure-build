@@ -185,3 +185,23 @@ jobs:
       - run: go build ./...
       - run: go vet ./...
       - run: go test ./...
+
+  # === SCA on the source: dependency + stdlib vulns that the code actually calls ===
+  govulncheck:
+    name: Dependency scan (govulncheck)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: stable
+          check-latest: true
+
+      # Call-graph aware: only reports vulnerabilities in code paths this
+      # service actually reaches — complements Trivy's inventory-level scan
+      # of the final image.
+      - name: Run govulncheck
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          govulncheck ./...
