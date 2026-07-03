@@ -51,6 +51,8 @@ graph LR
 | SAST | Semgrep CE (`p/golang`, `p/gosec`, `p/cwe-top-25`) | insecure code patterns fail the build before anything is compiled |
 | SCA | govulncheck | call-graph aware: vulnerabilities in dependencies & stdlib that the code **actually reaches** fail the build |
 | Supply-chain risk | Socket | behavioral analysis of dependency code on PRs (malware, install scripts, abandoned packages) — the day-zero risk CVE databases miss; blocking is policy-driven |
+| Secret scanning | Gitleaks | full git history scanned every run — a leaked key fails the build, even if it was committed and later removed |
+| IaC scan | Checkov | Dockerfile + Kubernetes manifest misconfigurations (root user, missing limits, mutable tags) fail the build |
 | Build | Docker multi-stage → distroless/static | no shell, no package manager, ~2 MB attack surface; base images pinned by digest |
 | Vulnerability gate | Trivy | CRITICAL/HIGH with an available fix ⇒ the image is **never published** |
 | Inventory | Syft | SPDX SBOM generated and attached to the image as a signed attestation |
@@ -58,8 +60,10 @@ graph LR
 | Provenance | GitHub Attestations (SLSA) | signed statement of the exact commit, workflow, and runner that produced the image |
 | Admission | Kyverno `verifyImages` | the cluster **fails closed**: only images signed by this repo's CI are schedulable; tags are mutated to verified digests |
 
-PRs run the build + Trivy + SBOM gates only; nothing is published or signed
-until the commit lands on `main`.
+On a **PR**, every gate above runs *except* publish/sign/attest — the image is
+built and scanned but never pushed. Signing, attestation, and the registry push
+happen only when the commit lands on `main`, so nothing unsigned or unverified
+ever reaches GHCR. (Go build/vet/test runs on both.)
 
 ### Supply-chain risk on every PR (Socket)
 
@@ -126,7 +130,7 @@ verified digest (`mutateDigest`), so even `:latest` deploys are reproducible.
 
 ```
 .
-├── .github/workflows/ci.yml                  # the pipeline (SAST→build→scan→SBOM→sign→attest→verify)
+├── .github/workflows/ci.yml                  # SAST · SCA · Socket · Gitleaks · Checkov · build→scan→SBOM→sign→attest→verify
 ├── Dockerfile                                # multi-stage, distroless, digest-pinned, version-stamped
 ├── cmd/server/main.go                        # entrypoint: wiring + build identity
 ├── internal/
