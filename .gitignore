@@ -1,0 +1,18 @@
+# Binaries & build artifacts
+/app
+*.exe
+*.out
+*.test
+dist/
+bin/
+
+# SBOM / scan outputs generated locally
+*.spdx.json
+*.cdx.json
+trivy-report.*
+
+# Editor / OS
+.idea/
+.vscode/
+.DS_Store
+/supply-chain-secure-build

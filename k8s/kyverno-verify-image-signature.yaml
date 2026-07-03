@@ -1,0 +1,34 @@
+# The consumer side of the supply chain: ADMISSION-TIME verification.
+#
+# Kyverno checks every Pod that references this repo's image and rejects it
+# unless the image carries a valid keyless Cosign signature issued to THIS
+# repository's CI workflow by GitHub's OIDC provider (and logged in Rekor).
+#
+# A signature made by any other repo, any other identity provider, or a
+# retagged/tampered image fails verification — the deploy never happens.
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: verify-supply-chain-signature
+spec:
+  validationFailureAction: Enforce # reject, don't just audit
+  webhookTimeoutSeconds: 30
+  failurePolicy: Fail # registry/Rekor unreachable => deny (fail closed)
+  rules:
+    - name: require-keyless-cosign-signature
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+      verifyImages:
+        - imageReferences:
+            - "ghcr.io/alice101-dev/supply-chain-secure-build*"
+          mutateDigest: true # rewrite tag -> verified digest in the pod spec
+          required: true
+          attestors:
+            - entries:
+                - keyless:
+                    subject: "https://github.com/alice101-dev/supply-chain-secure-build/.github/workflows/*"
+                    issuer: "https://token.actions.githubusercontent.com"
+                    rekor:
+                      url: https://rekor.sigstore.dev

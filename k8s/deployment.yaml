@@ -1,0 +1,56 @@
+# Example consumer deployment. With the Kyverno policy enforced, this only
+# schedules because the image is signed by this repo's CI — swap the image for
+# an unsigned one and admission rejects it.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: supply-chain-demo
+  namespace: default
+  annotations:
+    checkov.io/skip1: CKV_K8S_43=Kyverno mutateDigest rewrites the tag to the verified digest at admission
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: supply-chain-demo
+  template:
+    metadata:
+      labels:
+        app: supply-chain-demo
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532 # distroless nonroot
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: app
+          image: ghcr.io/alice101-dev/supply-chain-secure-build:latest # digest pinned by Kyverno at admission
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8080
+              name: http
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "32Mi"
+            limits:
+              cpu: "200m"
+              memory: "64Mi"
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 15
