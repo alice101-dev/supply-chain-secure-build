@@ -29,8 +29,10 @@ unscanned, or built anywhere else.
 
 ```mermaid
 graph LR
-    C["commit to main"] --> G["🔎 SAST gate<br>(Semgrep CE) ⇒ fail on findings"]
-    G --> B["🔨 build<br>(distroless, digest-pinned)"]
+    C["commit / PR"] --> G["🔎 SAST<br>(Semgrep CE)"]
+    G --> GV["🔗 SCA<br>(govulncheck)"]
+    GV --> SK["🧩 Socket<br>dep risk (PR)"]
+    SK --> B["🔨 build<br>(distroless, digest-pinned)"]
     B --> T["🛡️ Trivy gate<br>CRITICAL/HIGH ⇒ fail"]
     T --> S["📋 SBOM<br>(Syft, SPDX)"]
     S --> P["📦 push to GHCR"]
