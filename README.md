@@ -79,6 +79,18 @@ cosign verify-attestation --type spdxjson \
 gh attestation verify oci://$IMAGE --repo alice101-dev/supply-chain-secure-build
 ```
 
+What success looks like (output abbreviated):
+
+| Command | Key lines in a good result | What they prove |
+| --- | --- | --- |
+| `cosign verify` | `The cosign claims were validated` · `Existence of the claims in the transparency log was verified offline` · `The code-signing certificate was verified using trusted certificate authority certificates` | the signature is genuine, publicly logged in Rekor, and chained to Sigstore's CA — not self-asserted |
+| `cosign verify-attestation` | JSON entries with `"type": "https://spdx.dev/Document"` and `"https://slsa.dev/provenance/v1"`, all bound to the **same** `docker-manifest-digest` | the SBOM and provenance are attached to *exactly this image*, byte for byte — swap the image and the digest no longer matches |
+| `gh attestation verify` | `✓ Verification succeeded!` · `Build repo: alice101-dev/supply-chain-secure-build` · `Build workflow: .github/workflows/ci.yml@refs/heads/main` | the image was built by *this repo's* CI on `main` — not on someone's laptop, not by a fork |
+
+If any check fails — wrong repo, tampered layer, unsigned rebuild — the
+commands exit non-zero, and the same failure is what makes Kyverno reject the
+pod at admission.
+
 ## Enforce it in a cluster
 
 ```bash
