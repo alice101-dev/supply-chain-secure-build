@@ -36,7 +36,7 @@ jobs:
 
       # 2. Vulnerability gate: CRITICAL/HIGH with a fix available => fail here,
       #    BEFORE the image ever reaches a registry.
-      - name: Vulnerability scan (Trivy)
+      - name: Vulnerability gate (Trivy)
         uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: ${{ env.IMAGE }}:ci
@@ -119,7 +119,7 @@ jobs:
 
   # === Static checks on the Dockerfile & K8s manifests ===
   checkov:
-    name: Checkov security scan
+    name: IaC scan (Checkov)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -188,7 +188,7 @@ jobs:
 
   # === SCA on the source: dependency + stdlib vulns that the code actually calls ===
   govulncheck:
-    name: Dependency scan (govulncheck)
+    name: SCA (govulncheck)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
