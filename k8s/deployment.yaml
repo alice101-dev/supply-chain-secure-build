@@ -1,10 +1,10 @@
-# Example consumer deployment. With the Kyverno policy enforced, this only
-# schedules because the image is signed by this repo's CI — swap the image for
-# an unsigned one and admission rejects it.
+# Consumer deployment. With the Kyverno policy enforced, this only schedules
+# because the image is signed by this repo's CI — swap the image for an
+# unsigned one and admission rejects it.
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: supply-chain-demo
+  name: backend
   labels:
     pod-security.kubernetes.io/enforce: restricted
     pod-security.kubernetes.io/warn: restricted
@@ -12,22 +12,25 @@ metadata:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: supply-chain-demo
-  namespace: supply-chain-demo
+  name: backend-api
+  namespace: backend
+  labels:
+    app: backend-api
   annotations:
     checkov.io/skip1: CKV_K8S_43=Kyverno mutateDigest rewrites the tag to the verified digest at admission
     checkov.io/skip2: CKV_K8S_14=Deliberate — the tag is only a pointer; Kyverno resolves and pins the verified digest
 spec:
-  replicas: 1
+  replicas: 2
   selector:
     matchLabels:
-      app: supply-chain-demo
+      app: backend-api
   template:
     metadata:
       labels:
-        app: supply-chain-demo
+        app: backend-api
     spec:
       automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 30 # preStop none; app drains within SHUTDOWN_TIMEOUT (10s)
       securityContext:
         runAsNonRoot: true
         runAsUser: 65532 # distroless nonroot
@@ -35,12 +38,15 @@ spec:
         seccompProfile:
           type: RuntimeDefault
       containers:
-        - name: app
+        - name: backend-api
           image: ghcr.io/alice101-dev/supply-chain-secure-build:latest # digest pinned by Kyverno at admission
           imagePullPolicy: Always
           ports:
             - containerPort: 8080
               name: http
+          env:
+            - name: SHUTDOWN_TIMEOUT
+              value: "10s"
           securityContext:
             readOnlyRootFilesystem: true
             allowPrivilegeEscalation: false
@@ -53,9 +59,15 @@ spec:
             limits:
               cpu: "200m"
               memory: "64Mi"
-          readinessProbe:
+          startupProbe:
             httpGet:
               path: /healthz
+              port: http
+            periodSeconds: 2
+            failureThreshold: 15
+          readinessProbe:
+            httpGet:
+              path: /readyz # flips to 503 during graceful shutdown => traffic drains first
               port: http
             periodSeconds: 5
           livenessProbe:
@@ -64,17 +76,17 @@ spec:
               port: http
             periodSeconds: 15
 ---
-# Zero-trust default: only same-namespace pods may reach the demo service;
-# no egress at all (it calls nothing).
+# Zero-trust default: only same-namespace pods may reach the API; no egress
+# at all (it calls nothing).
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: supply-chain-demo
-  namespace: supply-chain-demo
+  name: backend-api
+  namespace: backend
 spec:
   podSelector:
     matchLabels:
-      app: supply-chain-demo
+      app: backend-api
   policyTypes:
     - Ingress
     - Egress

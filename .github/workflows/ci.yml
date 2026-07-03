@@ -72,6 +72,9 @@ jobs:
           tags: |
             ${{ env.IMAGE }}:latest
             ${{ env.IMAGE }}:sha-${{ github.sha }}
+          build-args: |
+            VERSION=sha-${{ github.sha }}
+            COMMIT=${{ github.sha }}
 
       - name: Install Cosign
         if: github.event_name == 'push'
@@ -166,3 +169,19 @@ jobs:
             --config p/gosec \
             --config p/cwe-top-25 \
             --error
+
+  # === Unit tests & static analysis on the Go source ===
+  go:
+    name: Go build, vet & test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: stable
+          check-latest: true
+
+      - run: go build ./...
+      - run: go vet ./...
+      - run: go test ./...

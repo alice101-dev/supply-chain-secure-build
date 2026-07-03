@@ -6,8 +6,16 @@ WORKDIR /src
 COPY go.mod ./
 RUN go mod download
 COPY . .
+
+# Build identity, stamped by CI — /version reports the exact commit that the
+# image's SLSA provenance attests to.
+ARG VERSION=dev
+ARG COMMIT=none
+
 # Static binary: no libc, no dynamic loader — runs on distroless/static.
-RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/app .
+RUN CGO_ENABLED=0 go build -trimpath \
+    -ldflags="-s -w -X main.version=${VERSION} -X main.commit=${COMMIT}" \
+    -o /out/app ./cmd/server
 
 # Runtime — distroless static: no shell, no package manager, no OS CVE surface,
 # runs as the built-in nonroot user (uid 65532). Pinned by digest.

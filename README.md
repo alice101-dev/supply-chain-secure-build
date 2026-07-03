@@ -80,13 +80,32 @@ verified digest (`mutateDigest`), so even `:latest` deploys are reproducible.
 
 ```
 .
-├── .github/workflows/ci.yml                  # the pipeline (build→scan→SBOM→sign→attest→verify)
-├── Dockerfile                                # multi-stage, distroless, digest-pinned
-├── main.go                                   # deliberately boring demo service
+├── .github/workflows/ci.yml                  # the pipeline (SAST→build→scan→SBOM→sign→attest→verify)
+├── Dockerfile                                # multi-stage, distroless, digest-pinned, version-stamped
+├── cmd/server/main.go                        # entrypoint: wiring + build identity
+├── internal/
+│   ├── config/                               # env-based config (twelve-factor)
+│   ├── handler/                              # routes, probes, request logging (+ unit tests)
+│   └── server/                               # hardened timeouts, graceful shutdown
 └── k8s/
     ├── kyverno-verify-image-signature.yaml   # admission: only OUR signatures pass
-    └── deployment.yaml                       # hardened example consumer
+    └── deployment.yaml                       # hardened consumer (backend-api)
 ```
+
+## The service itself
+
+Not a hello-world in one file — a production-shaped Go backend:
+
+- **Structured JSON logs** (`log/slog`) with per-request logging that skips
+  probe endpoints.
+- **Hardened `http.Server` timeouts** (read/write/idle/header) — one slow
+  client can't pin connections.
+- **Graceful shutdown**: on SIGTERM, `/readyz` flips to 503 so Kubernetes
+  drains traffic *first*, then in-flight requests finish within
+  `SHUTDOWN_TIMEOUT`.
+- **`/version` reports the exact commit** stamped at build time via
+  `-ldflags` — the same commit the image's SLSA provenance attests to, so
+  runtime identity and supply chain evidence line up.
 
 ## Related
 
