@@ -48,6 +48,7 @@ graph LR
 | --- | --- | --- |
 | SAST | Semgrep CE (`p/golang`, `p/gosec`, `p/cwe-top-25`) | insecure code patterns fail the build before anything is compiled |
 | SCA | govulncheck | call-graph aware: vulnerabilities in dependencies & stdlib that the code **actually reaches** fail the build |
+| Supply-chain risk | Socket | behavioral analysis of dependency code on PRs (malware, install scripts, abandoned packages) — the day-zero risk CVE databases miss; blocking is policy-driven |
 | Build | Docker multi-stage → distroless/static | no shell, no package manager, ~2 MB attack surface; base images pinned by digest |
 | Vulnerability gate | Trivy | CRITICAL/HIGH with an available fix ⇒ the image is **never published** |
 | Inventory | Syft | SPDX SBOM generated and attached to the image as a signed attestation |
