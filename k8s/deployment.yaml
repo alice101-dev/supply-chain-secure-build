@@ -1,13 +1,22 @@
 # Example consumer deployment. With the Kyverno policy enforced, this only
 # schedules because the image is signed by this repo's CI — swap the image for
 # an unsigned one and admission rejects it.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: supply-chain-demo
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/warn: restricted
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: supply-chain-demo
-  namespace: default
+  namespace: supply-chain-demo
   annotations:
     checkov.io/skip1: CKV_K8S_43=Kyverno mutateDigest rewrites the tag to the verified digest at admission
+    checkov.io/skip2: CKV_K8S_14=Deliberate — the tag is only a pointer; Kyverno resolves and pins the verified digest
 spec:
   replicas: 1
   selector:
@@ -54,3 +63,24 @@ spec:
               path: /healthz
               port: http
             periodSeconds: 15
+---
+# Zero-trust default: only same-namespace pods may reach the demo service;
+# no egress at all (it calls nothing).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: supply-chain-demo
+  namespace: supply-chain-demo
+spec:
+  podSelector:
+    matchLabels:
+      app: supply-chain-demo
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - podSelector: {}
+      ports:
+        - port: 8080
+          protocol: TCP
