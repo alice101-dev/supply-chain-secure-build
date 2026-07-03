@@ -2,11 +2,30 @@
 
 [![CI](https://github.com/alice101-dev/supply-chain-secure-build/actions/workflows/ci.yml/badge.svg)](https://github.com/alice101-dev/supply-chain-secure-build/actions/workflows/ci.yml)
 
-An end-to-end **secure software supply chain** on GitHub Actions: every image
-that leaves this repo carries an SBOM, has passed a vulnerability gate, is
-**signed keyless** (no signing keys exist, anywhere), ships **SLSA build
-provenance** — and a Kyverno policy makes Kubernetes **reject anything else**
-at admission.
+## Why this matters
+
+Modern breaches increasingly skip your firewall and walk in through the
+**build pipeline**. The attack doesn't have to come from outside:
+
+- **A malicious insider** (or one stolen laptop / CI token) builds an image
+  with a backdoor and `kubectl apply`s it straight to production — no review,
+  no scan, no trace of where the binary came from.
+- **A poisoned dependency** — one `go get` of a typosquatted or compromised
+  package (the xz-utils / event-stream / SolarWinds pattern) and the backdoor
+  is compiled into your binary *by your own CI*, signed off by nobody.
+- **A rogue image** — retagged, tampered, or pulled from an unvetted registry —
+  lands in the cluster because Kubernetes, by default, **runs whatever it is
+  told to run**. `image: attacker/nginx:latest` schedules just as happily as
+  yours.
+
+The common thread: without provenance, signatures, and admission-time
+verification, the cluster cannot tell *your* build from an attacker's. This
+repo closes that gap end to end — an **SBOM** for every image, a
+**vulnerability gate** before publish, **keyless signing** that cryptographically
+ties the image to *this repo's CI workflow* (an insider can't reproduce it from
+a laptop), **SLSA provenance** recording exactly which commit and runner built
+it, and a **Kyverno policy** that makes Kubernetes reject anything unsigned,
+unscanned, or built anywhere else.
 
 ```mermaid
 graph LR
