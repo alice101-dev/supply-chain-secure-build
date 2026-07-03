@@ -37,7 +37,7 @@ jobs:
       # 2. Vulnerability gate: CRITICAL/HIGH with a fix available => fail here,
       #    BEFORE the image ever reaches a registry.
       - name: Vulnerability scan (Trivy)
-        uses: aquasecurity/trivy-action@0.36.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: ${{ env.IMAGE }}:ci
           exit-code: "1"
@@ -75,7 +75,7 @@ jobs:
 
       - name: Install Cosign
         if: github.event_name == 'push'
-        uses: sigstore/cosign-installer@v4
+        uses: sigstore/cosign-installer@v4.1.2
 
       # 4. Keyless signing: no key to store, rotate, or leak. GitHub's OIDC
       #    token proves WHICH repo+workflow built the image; Fulcio issues a
