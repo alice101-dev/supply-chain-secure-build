@@ -60,6 +60,11 @@ graph LR
 | Provenance | GitHub Attestations (SLSA) | signed statement of the exact commit, workflow, and runner that produced the image |
 | Admission | Kyverno `verifyImages` | the cluster **fails closed**: only images signed by this repo's CI are schedulable; tags are mutated to verified digests |
 
+The pipeline also defends **itself**: every third-party action is pinned to a
+full commit SHA (with the version as a comment), so a hijacked action tag —
+the `tj-actions/changed-files` attack pattern — cannot inject code into this
+build. Same principle as the digest-pinned base images.
+
 On a **PR**, every gate above runs *except* publish/sign/attest — the image is
 built and scanned but never pushed. Signing, attestation, and the registry push
 happen only when the commit lands on `main`, so nothing unsigned or unverified
