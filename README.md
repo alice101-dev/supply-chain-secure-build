@@ -91,23 +91,31 @@ dependencies, blocked with `High CVE` alerts once the policy was set to `error`:
 
 ### After publish: continuous re-scanning
 
-Build-time scanning only knows the CVEs that existed when the image was built.
-New ones are disclosed daily, and an already-published image has no commit to
-re-trigger CI. A scheduled workflow (`.github/workflows/rescan.yml`) closes that
-window: every day it re-scans the published image's **signed SBOM** against the
-current Trivy database *and* re-verifies that its Cosign signature, SBOM
-attestation, and SLSA provenance still hold. It scans the SBOM, **not the image**
-— the SPDX inventory `cosign attest` attached at build time is already the package
-list, so re-scanning is a cheap DB match with no image pull or layer unpack. That
-is what keeps it light at scale: across many services a nightly SBOM scan is a DB
-match per service, not an image pull per service (and for a large fleet, feeding
-those SBOMs into a central monitor like Dependency-Track is lighter still). Because
-the image is already out, this is **detective, not preventive** — a regression
-opens (or updates) one tracking GitHub issue rather than blocking a build, and that
-issue auto-closes once a later scan comes back clean. The fix is a rebuild from
-`main`, or a justified, time-boxed `.trivyignore` entry. The workflow can also be
-run on demand against any published tag (`workflow_dispatch` with an `image_ref`
-input), not just on the daily schedule.
+A build-time scan only knows the CVEs that existed the day the image was built.
+New ones are disclosed daily — and a published image has no new commit to
+re-trigger CI, so nothing re-checks it.
+
+`.github/workflows/rescan.yml` closes that gap. Once a day (and on demand) it:
+
+- re-scans the published image's **signed SBOM** against the current Trivy
+  database, and
+- re-verifies that its Cosign signature, SBOM attestation, and SLSA provenance
+  still hold.
+
+**It scans the SBOM, not the image.** The SPDX inventory `cosign attest`
+attached at build time *is* the package list, so a re-scan is a cheap database
+match — no image pull, no layer unpack. That keeps it light at scale: across
+many services a nightly run is one DB match per service, not one image pull per
+service. (For a large fleet, feeding those SBOMs into a central monitor such as
+Dependency-Track is lighter still.)
+
+Because the image is already published, this is **detective, not preventive**. A
+regression doesn't block a build — it opens (or updates) a single tracking issue,
+which auto-closes once a later scan is clean. The fix is a rebuild from `main`,
+or a justified, time-boxed `.trivyignore` entry.
+
+The scan can also be run on demand against any published tag —
+`workflow_dispatch` with an `image_ref` input — not just on the daily schedule.
 
 ## Verify it yourself
 
