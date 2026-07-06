@@ -63,7 +63,10 @@ graph LR
 The pipeline also defends **itself**: every third-party action is pinned to a
 full commit SHA (with the version as a comment), so a hijacked action tag —
 the `tj-actions/changed-files` attack pattern — cannot inject code into this
-build. Same principle as the digest-pinned base images.
+build. Same principle as the digest-pinned base images. The gate order in the
+diagram is enforced with `needs:`, not just implied: the Docker build does not
+start until SAST, SCA, secret scanning, and the IaC scan have all passed, so a
+poisoned dependency stops the pipeline before Docker ever runs.
 
 On a **PR**, every gate above runs *except* publish/sign/attest — the image is
 built and scanned but never pushed. Signing, attestation, and the registry push
