@@ -105,7 +105,9 @@ those SBOMs into a central monitor like Dependency-Track is lighter still). Beca
 the image is already out, this is **detective, not preventive** — a regression
 opens (or updates) one tracking GitHub issue rather than blocking a build, and that
 issue auto-closes once a later scan comes back clean. The fix is a rebuild from
-`main`, or a justified, time-boxed `.trivyignore` entry.
+`main`, or a justified, time-boxed `.trivyignore` entry. The workflow can also be
+run on demand against any published tag (`workflow_dispatch` with an `image_ref`
+input), not just on the daily schedule.
 
 ## Verify it yourself
 
@@ -116,13 +118,13 @@ IMAGE=ghcr.io/alice101-dev/supply-chain-secure-build:latest
 
 # Signature: was this built by THIS repo's workflow?
 cosign verify \
-  --certificate-identity-regexp '^https://github.com/alice101-dev/supply-chain-secure-build/\.github/workflows/.*' \
+  --certificate-identity-regexp '^https://github.com/alice101-dev/supply-chain-secure-build/\.github/workflows/ci\.yml@refs/heads/main$' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
   "$IMAGE"
 
 # SBOM: what exactly is inside?
 cosign verify-attestation --type spdxjson \
-  --certificate-identity-regexp '^https://github.com/alice101-dev/supply-chain-secure-build/\.github/workflows/.*' \
+  --certificate-identity-regexp '^https://github.com/alice101-dev/supply-chain-secure-build/\.github/workflows/ci\.yml@refs/heads/main$' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
   "$IMAGE" | jq -r '.payload' | base64 -d | jq '.predicate.packages[].name'
 
