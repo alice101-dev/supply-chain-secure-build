@@ -23,7 +23,12 @@ name: Scheduled image re-scan
 on:
   schedule:
     - cron: "0 6 * * *" # daily at 06:00 UTC — tighten to "0 */6 * * *" for 6-hourly
-  workflow_dispatch: {} # allow an on-demand run
+  workflow_dispatch: # allow an on-demand run
+    inputs:
+      image_ref:
+        description: "Image tag to re-scan (defaults to latest)"
+        default: "latest"
+        required: false
 
 permissions:
   contents: read
@@ -55,15 +60,19 @@ jobs:
       - name: Install Cosign
         uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
 
-      # Pin to the immutable digest behind :latest so every check refers to the
+      # Pin to the immutable digest behind the tag so every check refers to the
       # exact same artifact. imagetools inspect fetches only the manifest (a few
-      # KB) — not the image layers.
-      - name: Resolve :latest to a digest
+      # KB) — not the image layers. Scheduled runs always use :latest; a manual
+      # run can target any tag via the image_ref input (used to point the scan
+      # at a deliberately vulnerable :vuln-demo image when validating detection).
+      - name: Resolve image tag to a digest
         id: resolve
+        env:
+          TAG: ${{ inputs.image_ref || 'latest' }}
         run: |
-          DIGEST=$(docker buildx imagetools inspect "${IMAGE}:latest" --format '{{ .Manifest.Digest }}')
+          DIGEST=$(docker buildx imagetools inspect "${IMAGE}:${TAG}" --format '{{ .Manifest.Digest }}')
           echo "digest=${DIGEST}" >> "$GITHUB_OUTPUT"
-          echo "Re-scanning ${IMAGE}@${DIGEST}"
+          echo "Re-scanning ${IMAGE}:${TAG} => ${IMAGE}@${DIGEST}"
 
       # --- Detective checks. Each is allowed to fail without aborting the job,
       #     so we can gather every result and report them together. ---

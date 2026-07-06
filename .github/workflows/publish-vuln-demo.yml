@@ -1,0 +1,88 @@
+name: Publish vuln-demo image (test harness)
+
+# TEST HARNESS — NOT part of the real supply chain.
+#
+# Deliberately publishes a KNOWN-VULNERABLE image to the throwaway :vuln-demo
+# tag, signed and SBOM/provenance-attested exactly like ci.yml, so the scheduled
+# re-scan (rescan.yml) can be pointed at it — `workflow_dispatch` with
+# image_ref=vuln-demo — to prove it detects CVEs and opens a tracking issue.
+#
+# It builds from the test/vulnerable-deps-scanner branch (casdoor, gogs,
+# x/crypto v0.51.0, ...) and deliberately SKIPS the Trivy gate: the whole point
+# is to get a vulnerable-but-properly-signed artifact into the registry. :latest
+# is never touched. Delete the tag after the demo:
+#   gh api -X DELETE "/user/packages/container/supply-chain-secure-build/versions/<id>"
+
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  packages: write # push :vuln-demo to GHCR
+  id-token: write # keyless Cosign signing
+  attestations: write # SLSA provenance
+
+env:
+  IMAGE: ghcr.io/${{ github.repository }}
+  TAG: vuln-demo
+
+jobs:
+  publish:
+    name: Build, sign & attest the vulnerable demo image
+    runs-on: ubuntu-latest
+    steps:
+      # Build the vulnerable dependency set without landing it on main.
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: test/vulnerable-deps-scanner
+
+      - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+
+      - name: Login to GHCR
+        uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4.4.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      # No Trivy gate here on purpose — we WANT the vulnerable image published.
+      - name: Build & push vulnerable image
+        id: push
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          push: true
+          tags: ${{ env.IMAGE }}:${{ env.TAG }}
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+
+      - name: Sign image (Cosign keyless)
+        run: cosign sign --yes "${IMAGE}@${DIGEST}"
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
+
+      # Same signed SPDX SBOM the re-scan expects to fetch and scan.
+      - name: Generate SBOM (Syft)
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+        with:
+          image: ${{ env.IMAGE }}@${{ steps.push.outputs.digest }}
+          format: spdx-json
+          output-file: sbom.spdx.json
+
+      - name: Attest SBOM
+        run: cosign attest --yes --type spdxjson --predicate sbom.spdx.json "${IMAGE}@${DIGEST}"
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
+
+      - name: Attest build provenance (SLSA)
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: true
+
+      - name: Next step
+        run: |
+          echo "Published signed vulnerable image: ${IMAGE}:${TAG}"
+          echo "Now run: gh workflow run \"Scheduled image re-scan\" -f image_ref=${TAG}"
