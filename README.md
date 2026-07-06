@@ -29,10 +29,14 @@ unscanned, or built anywhere else.
 
 ```mermaid
 graph LR
-    C["commit / PR"] --> G["🔎 SAST<br>(Semgrep CE)"]
-    G --> GV["🔗 SCA<br>(govulncheck)"]
-    GV --> SK["🧩 Socket<br>dep risk (PR)"]
-    SK --> B["🔨 build<br>(distroless, digest-pinned)"]
+    C["commit / PR"]
+    C --> G["🔎 SAST<br>(Semgrep CE)"]
+    C --> GV["🔗 SCA<br>(govulncheck)"]
+    C --> GL["🔑 secrets<br>(Gitleaks)"]
+    C --> CK["📐 IaC scan<br>(Checkov)"]
+    C --> GO["🧪 go<br>build / vet / test"]
+    G & GV & GL & CK & GO --> B["🔨 build<br>(distroless, digest-pinned)"]
+    C -.PR only.-> SK["🧩 Socket dep risk<br>(gates merge, not build)"]
     B --> T["🛡️ Trivy gate<br>CRITICAL/HIGH ⇒ fail"]
     T --> S["📋 SBOM<br>(Syft, SPDX)"]
     S --> P["📦 push to GHCR"]
@@ -65,8 +69,10 @@ full commit SHA (with the version as a comment), so a hijacked action tag —
 the `tj-actions/changed-files` attack pattern — cannot inject code into this
 build. Same principle as the digest-pinned base images. The gate order in the
 diagram is enforced with `needs:`, not just implied: the Docker build does not
-start until SAST, SCA, secret scanning, and the IaC scan have all passed, so a
-poisoned dependency stops the pipeline before Docker ever runs.
+start until SAST, SCA, secret scanning, the IaC scan, and `go build/vet/test`
+have all passed, so a poisoned dependency stops the pipeline before Docker ever
+runs. Socket is the one exception — it runs on PRs only, so it gates the merge
+to `main` (via required status checks) rather than the build itself.
 
 On a **PR**, every gate above runs *except* publish/sign/attest — the image is
 built and scanned but never pushed. Signing, attestation, and the registry push
