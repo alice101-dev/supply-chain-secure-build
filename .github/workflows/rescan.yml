@@ -63,8 +63,8 @@ jobs:
       # Pin to the immutable digest behind the tag so every check refers to the
       # exact same artifact. imagetools inspect fetches only the manifest (a few
       # KB) — not the image layers. Scheduled runs always use :latest; a manual
-      # run can target any tag via the image_ref input (used to point the scan
-      # at a deliberately vulnerable :vuln-demo image when validating detection).
+      # run can target any published tag via the image_ref input (e.g. re-scan a
+      # specific release on demand).
       - name: Resolve image tag to a digest
         id: resolve
         env:
@@ -86,7 +86,7 @@ jobs:
           DIGEST: ${{ steps.resolve.outputs.digest }}
         run: |
           cosign verify-attestation --type spdxjson \
-            --certificate-identity-regexp "^https://github.com/${{ github.repository }}/\.github/workflows/.*" \
+            --certificate-identity-regexp "^https://github.com/${{ github.repository }}/\.github/workflows/ci\.yml@refs/heads/main$" \
             --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
             "${IMAGE}@${DIGEST}" > attestation.json
           PAYLOAD=$(jq -r 'select(.payload != null) | .payload' attestation.json | head -n1)
@@ -120,7 +120,7 @@ jobs:
           DIGEST: ${{ steps.resolve.outputs.digest }}
         run: |
           cosign verify \
-            --certificate-identity-regexp "^https://github.com/${{ github.repository }}/\.github/workflows/.*" \
+            --certificate-identity-regexp "^https://github.com/${{ github.repository }}/\.github/workflows/ci\.yml@refs/heads/main$" \
             --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
             "${IMAGE}@${DIGEST}"
 
