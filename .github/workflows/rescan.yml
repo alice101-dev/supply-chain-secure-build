@@ -1,0 +1,173 @@
+name: Scheduled image re-scan
+
+# Build-time scanning only knows the CVEs that existed when the image was built.
+# New ones are disclosed daily, and an already-published image has no commit to
+# re-trigger ci.yml — so a container that passed every gate last week can be
+# vulnerable today with nothing to notice it. This time-driven job re-scans the
+# CURRENTLY PUBLISHED image against today's vulnerability database and re-verifies
+# that its signature and attestations still hold.
+#
+# It is DETECTIVE, not preventive: the image is already out, so a finding cannot
+# "fail" anything into non-existence. The output is a tracking GitHub issue (the
+# fix is a human rebuild), which auto-closes once a later scan comes back clean.
+
+on:
+  schedule:
+    - cron: "0 6 * * *" # daily at 06:00 UTC — tighten to "0 */6 * * *" for 6-hourly
+  workflow_dispatch: {} # allow an on-demand run
+
+permissions:
+  contents: read
+  packages: read # pull the published image from GHCR
+  attestations: read # read the SLSA provenance attestation
+  issues: write # open / comment / close the tracking issue
+
+concurrency:
+  group: rescan
+  cancel-in-progress: false
+
+env:
+  IMAGE: ghcr.io/${{ github.repository }}
+
+jobs:
+  rescan:
+    name: Re-scan & re-verify published image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Login to GHCR
+        uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4.4.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      # Pin to the immutable digest behind :latest, so the scan and all three
+      # verifications refer to the exact same artifact (tags are mutable).
+      - name: Resolve :latest to a digest
+        id: resolve
+        run: |
+          DIGEST=$(docker buildx imagetools inspect "${IMAGE}:latest" --format '{{ .Manifest.Digest }}')
+          echo "digest=${DIGEST}" >> "$GITHUB_OUTPUT"
+          echo "Re-scanning ${IMAGE}@${DIGEST}"
+
+      # --- Detective checks. Each is allowed to fail without aborting the job,
+      #     so we can gather every result and report them together. ---
+
+      - name: Re-scan against today's vulnerability DB (Trivy)
+        id: trivy
+        continue-on-error: true
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ env.IMAGE }}@${{ steps.resolve.outputs.digest }}
+          format: table
+          output: trivy-report.txt
+          severity: CRITICAL,HIGH
+          ignore-unfixed: false
+          exit-code: "1"
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+
+      - name: Re-verify signature (Cosign)
+        id: verify_sig
+        continue-on-error: true
+        env:
+          DIGEST: ${{ steps.resolve.outputs.digest }}
+        run: |
+          cosign verify \
+            --certificate-identity-regexp "^https://github.com/${{ github.repository }}/\.github/workflows/.*" \
+            --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+            "${IMAGE}@${DIGEST}"
+
+      - name: Re-verify SBOM attestation (Cosign)
+        id: verify_sbom
+        continue-on-error: true
+        env:
+          DIGEST: ${{ steps.resolve.outputs.digest }}
+        run: |
+          cosign verify-attestation --type spdxjson \
+            --certificate-identity-regexp "^https://github.com/${{ github.repository }}/\.github/workflows/.*" \
+            --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+            "${IMAGE}@${DIGEST}"
+
+      - name: Re-verify SLSA build provenance (gh attestation)
+        id: verify_prov
+        continue-on-error: true
+        env:
+          DIGEST: ${{ steps.resolve.outputs.digest }}
+          GH_TOKEN: ${{ github.token }}
+        run: gh attestation verify "oci://${IMAGE}@${DIGEST}" --repo "${{ github.repository }}"
+
+      # --- Report. Any red check opens or updates one tracking issue (deduped by
+      #     label so a daily run does not spam a new issue every morning). ---
+
+      - name: File or update the tracking issue on any regression
+        if: steps.trivy.outcome == 'failure' || steps.verify_sig.outcome == 'failure' || steps.verify_sbom.outcome == 'failure' || steps.verify_prov.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DIGEST: ${{ steps.resolve.outputs.digest }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          TRIVY: ${{ steps.trivy.outcome }}
+          SIG: ${{ steps.verify_sig.outcome }}
+          SBOM: ${{ steps.verify_sbom.outcome }}
+          PROV: ${{ steps.verify_prov.outcome }}
+        run: |
+          LABEL="rescan"
+          gh label create "$LABEL" --color B60205 --description "Regression found by the scheduled image re-scan" 2>/dev/null || true
+
+          {
+            echo "The scheduled re-scan of the **published** image found a regression it passed at build time."
+            echo
+            echo "- Image: \`${IMAGE}@${DIGEST}\`"
+            echo "- Run: ${RUN_URL}"
+            echo
+            echo "| Check | Result |"
+            echo "| --- | --- |"
+            echo "| Trivy vuln scan (CRITICAL/HIGH, incl. unfixed) | ${TRIVY} |"
+            echo "| Cosign signature | ${SIG} |"
+            echo "| SBOM attestation | ${SBOM} |"
+            echo "| SLSA provenance | ${PROV} |"
+            echo
+            if [ -s trivy-report.txt ]; then
+              echo "<details><summary>Trivy report</summary>"
+              echo
+              echo '```'
+              head -c 60000 trivy-report.txt
+              echo '```'
+              echo
+              echo "</details>"
+              echo
+            fi
+            echo "**Remediation:** rebuild from \`main\` with patched deps/toolchain, or — if a CVE is"
+            echo "genuinely unfixable — add a justified, time-boxed entry to \`.trivyignore\`. A signature"
+            echo "or attestation failure instead means the registry artifact was tampered with or removed:"
+            echo "investigate before rebuilding."
+          } > issue-body.md
+
+          EXISTING=$(gh issue list --state open --label "$LABEL" --json number --jq '.[0].number // empty')
+          if [ -n "$EXISTING" ]; then
+            gh issue comment "$EXISTING" --body-file issue-body.md
+          else
+            gh issue create --title "🔁 Scheduled re-scan regression on the published image" --label "$LABEL" --body-file issue-body.md
+          fi
+
+      # A clean run resolves any open tracking issue, so the issue's state always
+      # reflects the image's current standing without manual bookkeeping.
+      - name: Resolve the tracking issue when everything passes
+        if: steps.trivy.outcome == 'success' && steps.verify_sig.outcome == 'success' && steps.verify_sbom.outcome == 'success' && steps.verify_prov.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for n in $(gh issue list --state open --label rescan --json number --jq '.[].number'); do
+            gh issue comment "$n" --body "✅ Re-scan on $(date -u +%FT%TZ) is clean — signature, attestations, and vulnerability scan all pass. Closing."
+            gh issue close "$n"
+          done
+
+      # Surface the outcome on the Actions tab too, not just in the issue.
+      - name: Fail the run if anything regressed
+        if: steps.trivy.outcome == 'failure' || steps.verify_sig.outcome == 'failure' || steps.verify_sbom.outcome == 'failure' || steps.verify_prov.outcome == 'failure'
+        run: |
+          echo "Re-scan found a regression — see the tracking issue." >&2
+          exit 1

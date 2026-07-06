@@ -89,6 +89,19 @@ dependencies, blocked with `High CVE` alerts once the policy was set to `error`:
 
 ![Socket Security dependency-overview scorecard on a pull request, scoring the four added packages (gogs, casdoor, x/crypto, go-base) with their Vulnerability columns flagged red](scan.png)
 
+### After publish: continuous re-scanning
+
+Build-time scanning only knows the CVEs that existed when the image was built.
+New ones are disclosed daily, and an already-published image has no commit to
+re-trigger CI. A scheduled workflow (`.github/workflows/rescan.yml`) closes that
+window: every day it re-scans the **published** image against the current Trivy
+database *and* re-verifies that its Cosign signature, SBOM attestation, and SLSA
+provenance still hold. Because the image is already out, this is **detective, not
+preventive** — a regression opens (or updates) one tracking GitHub issue rather
+than blocking a build, and that issue auto-closes once a later scan comes back
+clean. The fix is a rebuild from `main`, or a justified, time-boxed `.trivyignore`
+entry.
+
 ## Verify it yourself
 
 Anyone can verify the image — that's the point of keyless + transparency logs:
