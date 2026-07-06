@@ -4,8 +4,17 @@ name: Scheduled image re-scan
 # New ones are disclosed daily, and an already-published image has no commit to
 # re-trigger ci.yml — so a container that passed every gate last week can be
 # vulnerable today with nothing to notice it. This time-driven job re-scans the
-# CURRENTLY PUBLISHED image against today's vulnerability database and re-verifies
+# currently published image against today's vulnerability database and re-verifies
 # that its signature and attestations still hold.
+#
+# It scans the image's SIGNED SBOM, not the image itself: `cosign attest` already
+# attached a full SPDX inventory at build time, so re-scanning means matching that
+# package list against today's DB — no image pull, no layer unpack. The expensive
+# cataloging was paid once at build. This is what makes the pattern scale: across
+# 100 services a nightly SBOM scan is a cheap DB match per service, not 100 image
+# pulls. (For a large fleet, feeding these SBOMs into a central monitor such as
+# Dependency-Track is lighter still — one ingest, continuous re-evaluation, shared
+# dependencies deduped across services.)
 #
 # It is DETECTIVE, not preventive: the image is already out, so a finding cannot
 # "fail" anything into non-existence. The output is a tracking GitHub issue (the
@@ -18,7 +27,7 @@ on:
 
 permissions:
   contents: read
-  packages: read # pull the published image from GHCR
+  packages: read # read the signed SBOM / signature from GHCR
   attestations: read # read the SLSA provenance attestation
   issues: write # open / comment / close the tracking issue
 
@@ -31,7 +40,7 @@ env:
 
 jobs:
   rescan:
-    name: Re-scan & re-verify published image
+    name: Re-scan SBOM & re-verify published image
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -43,8 +52,12 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ github.token }}
 
-      # Pin to the immutable digest behind :latest, so the scan and all three
-      # verifications refer to the exact same artifact (tags are mutable).
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+
+      # Pin to the immutable digest behind :latest so every check refers to the
+      # exact same artifact. imagetools inspect fetches only the manifest (a few
+      # KB) — not the image layers.
       - name: Resolve :latest to a digest
         id: resolve
         run: |
@@ -55,20 +68,41 @@ jobs:
       # --- Detective checks. Each is allowed to fail without aborting the job,
       #     so we can gather every result and report them together. ---
 
-      - name: Re-scan against today's vulnerability DB (Trivy)
+      # Verify the SBOM attestation's signature AND pull its content in one step:
+      # we only ever scan an SBOM that cosign confirms this repo's CI signed.
+      - name: Re-verify & fetch the signed SBOM (Cosign)
+        id: verify_sbom
+        continue-on-error: true
+        env:
+          DIGEST: ${{ steps.resolve.outputs.digest }}
+        run: |
+          cosign verify-attestation --type spdxjson \
+            --certificate-identity-regexp "^https://github.com/${{ github.repository }}/\.github/workflows/.*" \
+            --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+            "${IMAGE}@${DIGEST}" > attestation.json
+          PAYLOAD=$(jq -r 'select(.payload != null) | .payload' attestation.json | head -n1)
+          if [ -z "$PAYLOAD" ]; then
+            echo "no spdxjson attestation found on ${IMAGE}@${DIGEST}" >&2
+            exit 1
+          fi
+          echo "$PAYLOAD" | base64 -d | jq '.predicate' > sbom.spdx.json
+          echo "Extracted signed SBOM: $(jq '.packages | length' sbom.spdx.json) packages"
+
+      # Scan the SBOM file — no image pull, no layer unpack. Same policy as the
+      # build gate (CRITICAL/HIGH, unfixed included).
+      - name: Re-scan the SBOM against today's vulnerability DB (Trivy)
         id: trivy
+        if: steps.verify_sbom.outcome == 'success'
         continue-on-error: true
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
-          image-ref: ${{ env.IMAGE }}@${{ steps.resolve.outputs.digest }}
+          scan-type: sbom
+          scan-ref: sbom.spdx.json
           format: table
           output: trivy-report.txt
           severity: CRITICAL,HIGH
           ignore-unfixed: false
           exit-code: "1"
-
-      - name: Install Cosign
-        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
 
       - name: Re-verify signature (Cosign)
         id: verify_sig
@@ -77,17 +111,6 @@ jobs:
           DIGEST: ${{ steps.resolve.outputs.digest }}
         run: |
           cosign verify \
-            --certificate-identity-regexp "^https://github.com/${{ github.repository }}/\.github/workflows/.*" \
-            --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
-            "${IMAGE}@${DIGEST}"
-
-      - name: Re-verify SBOM attestation (Cosign)
-        id: verify_sbom
-        continue-on-error: true
-        env:
-          DIGEST: ${{ steps.resolve.outputs.digest }}
-        run: |
-          cosign verify-attestation --type spdxjson \
             --certificate-identity-regexp "^https://github.com/${{ github.repository }}/\.github/workflows/.*" \
             --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
             "${IMAGE}@${DIGEST}"
@@ -101,17 +124,19 @@ jobs:
         run: gh attestation verify "oci://${IMAGE}@${DIGEST}" --repo "${{ github.repository }}"
 
       # --- Report. Any red check opens or updates one tracking issue (deduped by
-      #     label so a daily run does not spam a new issue every morning). ---
+      #     label so a daily run does not spam a new issue every morning). A
+      #     skipped Trivy (SBOM verification failed) is treated as unresolved via
+      #     the verify_sbom failure below, so it never masquerades as a pass. ---
 
       - name: File or update the tracking issue on any regression
-        if: steps.trivy.outcome == 'failure' || steps.verify_sig.outcome == 'failure' || steps.verify_sbom.outcome == 'failure' || steps.verify_prov.outcome == 'failure'
+        if: steps.verify_sbom.outcome == 'failure' || steps.trivy.outcome == 'failure' || steps.verify_sig.outcome == 'failure' || steps.verify_prov.outcome == 'failure'
         env:
           GH_TOKEN: ${{ github.token }}
           DIGEST: ${{ steps.resolve.outputs.digest }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          SBOMV: ${{ steps.verify_sbom.outcome }}
           TRIVY: ${{ steps.trivy.outcome }}
           SIG: ${{ steps.verify_sig.outcome }}
-          SBOM: ${{ steps.verify_sbom.outcome }}
           PROV: ${{ steps.verify_prov.outcome }}
         run: |
           LABEL="rescan"
@@ -125,9 +150,9 @@ jobs:
             echo
             echo "| Check | Result |"
             echo "| --- | --- |"
-            echo "| Trivy vuln scan (CRITICAL/HIGH, incl. unfixed) | ${TRIVY} |"
+            echo "| SBOM attestation (verify + fetch) | ${SBOMV} |"
+            echo "| Trivy SBOM scan (CRITICAL/HIGH, incl. unfixed) | ${TRIVY} |"
             echo "| Cosign signature | ${SIG} |"
-            echo "| SBOM attestation | ${SBOM} |"
             echo "| SLSA provenance | ${PROV} |"
             echo
             if [ -s trivy-report.txt ]; then
@@ -153,21 +178,21 @@ jobs:
             gh issue create --title "🔁 Scheduled re-scan regression on the published image" --label "$LABEL" --body-file issue-body.md
           fi
 
-      # A clean run resolves any open tracking issue, so the issue's state always
-      # reflects the image's current standing without manual bookkeeping.
+      # A fully clean run resolves any open tracking issue, so the issue's state
+      # always reflects the image's current standing without manual bookkeeping.
       - name: Resolve the tracking issue when everything passes
-        if: steps.trivy.outcome == 'success' && steps.verify_sig.outcome == 'success' && steps.verify_sbom.outcome == 'success' && steps.verify_prov.outcome == 'success'
+        if: steps.verify_sbom.outcome == 'success' && steps.trivy.outcome == 'success' && steps.verify_sig.outcome == 'success' && steps.verify_prov.outcome == 'success'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           for n in $(gh issue list --state open --label rescan --json number --jq '.[].number'); do
-            gh issue comment "$n" --body "✅ Re-scan on $(date -u +%FT%TZ) is clean — signature, attestations, and vulnerability scan all pass. Closing."
+            gh issue comment "$n" --body "✅ Re-scan on $(date -u +%FT%TZ) is clean — SBOM, signature, and provenance all verify and no CRITICAL/HIGH found. Closing."
             gh issue close "$n"
           done
 
       # Surface the outcome on the Actions tab too, not just in the issue.
       - name: Fail the run if anything regressed
-        if: steps.trivy.outcome == 'failure' || steps.verify_sig.outcome == 'failure' || steps.verify_sbom.outcome == 'failure' || steps.verify_prov.outcome == 'failure'
+        if: steps.verify_sbom.outcome == 'failure' || steps.trivy.outcome == 'failure' || steps.verify_sig.outcome == 'failure' || steps.verify_prov.outcome == 'failure'
         run: |
           echo "Re-scan found a regression — see the tracking issue." >&2
           exit 1

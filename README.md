@@ -94,13 +94,18 @@ dependencies, blocked with `High CVE` alerts once the policy was set to `error`:
 Build-time scanning only knows the CVEs that existed when the image was built.
 New ones are disclosed daily, and an already-published image has no commit to
 re-trigger CI. A scheduled workflow (`.github/workflows/rescan.yml`) closes that
-window: every day it re-scans the **published** image against the current Trivy
-database *and* re-verifies that its Cosign signature, SBOM attestation, and SLSA
-provenance still hold. Because the image is already out, this is **detective, not
-preventive** — a regression opens (or updates) one tracking GitHub issue rather
-than blocking a build, and that issue auto-closes once a later scan comes back
-clean. The fix is a rebuild from `main`, or a justified, time-boxed `.trivyignore`
-entry.
+window: every day it re-scans the published image's **signed SBOM** against the
+current Trivy database *and* re-verifies that its Cosign signature, SBOM
+attestation, and SLSA provenance still hold. It scans the SBOM, **not the image**
+— the SPDX inventory `cosign attest` attached at build time is already the package
+list, so re-scanning is a cheap DB match with no image pull or layer unpack. That
+is what keeps it light at scale: across many services a nightly SBOM scan is a DB
+match per service, not an image pull per service (and for a large fleet, feeding
+those SBOMs into a central monitor like Dependency-Track is lighter still). Because
+the image is already out, this is **detective, not preventive** — a regression
+opens (or updates) one tracking GitHub issue rather than blocking a build, and that
+issue auto-closes once a later scan comes back clean. The fix is a rebuild from
+`main`, or a justified, time-boxed `.trivyignore` entry.
 
 ## Verify it yourself
 
