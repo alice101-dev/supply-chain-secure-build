@@ -87,7 +87,7 @@ the Socket **Security Policy** (`error` fails the check, `warn` only reports) â€
 not in the workflow. Below: a test PR that added deliberately dangerous
 dependencies, blocked with `High CVE` alerts once the policy was set to `error`:
 
-![Socket flagging risky dependencies on a pull request with High CVE alerts](socket-scan.png)
+![Socket Security dependency-overview scorecard on a pull request, scoring the four added packages (gogs, casdoor, x/crypto, go-base) with their Vulnerability columns flagged red](scan.png)
 
 ## Verify it yourself
 
