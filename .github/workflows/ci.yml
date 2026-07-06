@@ -15,6 +15,14 @@ jobs:
   # === Build → SBOM → vulnerability gate → publish → sign → attest → verify ===
   supply-chain:
     name: Build, scan, sign & attest
+    # Shift-left ordering: the image is not even BUILT until every source-level
+    # gate has passed — a poisoned dependency, insecure pattern, or leaked
+    # secret stops the pipeline before Docker runs, and a red govulncheck can
+    # never race a green Trivy to the registry on a direct push to main.
+    # Socket is deliberately not listed: it only runs on PRs, and a skipped
+    # `needs` entry would skip this job entirely on main; its gate is enforced
+    # at merge time via required status checks instead.
+    needs: [go, govulncheck, semgrep, gitleaks, checkov]
     runs-on: ubuntu-latest
     permissions:
       contents: read
