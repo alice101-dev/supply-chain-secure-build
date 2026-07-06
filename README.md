@@ -58,7 +58,7 @@ graph LR
 | Secret scanning | Gitleaks | full git history scanned every run — a leaked key fails the build, even if it was committed and later removed |
 | IaC scan | Checkov | Dockerfile + Kubernetes manifest misconfigurations (root user, missing limits, mutable tags) fail the build |
 | Build | Docker multi-stage → distroless/static | no shell, no package manager, ~2 MB attack surface; base images pinned by digest |
-| Vulnerability gate | Trivy | CRITICAL/HIGH with an available fix ⇒ the image is **never published** |
+| Vulnerability gate | Trivy | **any** CRITICAL/HIGH ⇒ the image is **never published** — unfixed CVEs included (no silent `ignore-unfixed`); the only way past is a documented, time-boxed exception in `.trivyignore` |
 | Inventory | Syft | SPDX SBOM generated and attached to the image as a signed attestation |
 | Signing | Cosign **keyless** | GitHub OIDC proves *which repo & workflow* built it; Fulcio issues a short-lived cert; the signature is logged in Rekor. **No key to store, rotate, or leak** |
 | Provenance | GitHub Attestations (SLSA) | signed statement of the exact commit, workflow, and runner that produced the image |
