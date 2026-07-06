@@ -42,15 +42,19 @@ jobs:
           load: true
           tags: ${{ env.IMAGE }}:ci
 
-      # 2. Vulnerability gate: CRITICAL/HIGH with a fix available => fail here,
-      #    BEFORE the image ever reaches a registry.
+      # 2. Vulnerability gate: any CRITICAL/HIGH fails here, BEFORE the image
+      #    reaches a registry — including vulns with no upstream fix yet. We keep
+      #    ignore-unfixed set explicitly to false (not removed) so the policy is
+      #    self-documenting: an unfixable CVE must be an explicit, time-boxed
+      #    exception in .trivyignore that a reviewer signs off on, not a silent
+      #    pass. trivy-action auto-loads .trivyignore from the repo root.
       - name: Vulnerability gate (Trivy)
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: ${{ env.IMAGE }}:ci
           exit-code: "1"
           severity: CRITICAL,HIGH
-          ignore-unfixed: true
+          ignore-unfixed: false
 
       # 3. SBOM: a complete inventory of what's inside the image (SPDX).
       - name: Generate SBOM (Syft)

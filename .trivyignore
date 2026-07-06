@@ -1,0 +1,18 @@
+# Trivy vulnerability-gate exceptions.
+#
+# Policy: the gate fails on every CRITICAL/HIGH, including vulnerabilities with
+# no upstream fix (ignore-unfixed is explicitly false in ci.yml). A CVE may only
+# be suppressed here with an explicit, time-boxed justification — this file is
+# the auditable record a reviewer or auditor reads.
+#
+# Format — one CVE ID per line, each preceded by a comment stating:
+#   - why it does not apply or is accepted (link a VEX statement or issue)
+#   - who accepted it, and the date
+#   - a review-by date; expired entries must be re-justified or removed
+#
+# Example:
+#   # CVE-2024-XXXXX — unreachable: the vulnerable code path is never called.
+#   # Accepted by @alice101-dev 2026-07-06, review by 2026-10-06. Ref: #12
+#   CVE-2024-XXXXX
+#
+# No active exceptions.
